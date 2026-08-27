@@ -2,15 +2,14 @@
 tiktok_events.py
 Отправка Purchase-события в TikTok Events API при продаже в AmoCRM.
 
+Упрощённая версия: работает только с одним Business Center (ООО "Артагед",
+7410341052470607888), используя один токен, который покрывает и чтение
+кампаний/пикселей, и отправку событий в этом BC.
+
 Матчинг пользователя, в порядке приоритета:
   1. ttclid — если клиент кликнул по рекламе и перешёл на сайт
-  2. хешированный телефон (Advanced Matching) — работает и для лидов из бота/директа
-  3. IP-адрес / User-Agent — дополнительные сигналы, добавляются всегда, если известны
-
-Пиксель для баера определяется автоматически: сканируем все advertiser-аккаунты
-во всех Business Center, смотрим названия кампаний ("Оффер | БАЕР | ссылка"),
-для каждого встреченного баера берём pixel_id аккаунта, где он рекламируется.
-Кеш обновляется по таймеру, новые аккаунты/баеры подхватываются сами.
+  2. хешированный телефон (Advanced Matching)
+  3. IP-адрес / User-Agent — дополнительные сигналы
 """
 
 import os
@@ -29,7 +28,6 @@ TIKTOK_API_BASE = "https://business-api.tiktok.com/open_api/v1.3"
 TIKTOK_TEST_EVENT_CODE = os.getenv("TIKTOK_TEST_EVENT_CODE", "")
 
 BUSINESS_CENTER_IDS = [
-    "7632400042631888913",
     "7410341052470607888",
 ]
 
@@ -42,7 +40,6 @@ _cache_lock = asyncio.Lock()
 
 
 def _normalize_phone(phone: str) -> Optional[str]:
-    """Приводит номер к формату +375XXXXXXXXX. Возвращает None, если не похоже на номер."""
     digits = "".join(c for c in phone if c.isdigit())
     if not digits:
         return None
@@ -166,11 +163,6 @@ async def send_purchase_event(
     user_agent: Optional[str] = None,
     currency: str = "RUB",
 ):
-    """
-    Отправляет событие CompletePayment в TikTok. Матчинг по приоритету:
-    ttclid > хешированный телефон > IP/UA. Событие уходит, если есть
-    хотя бы один из этих сигналов — иначе отправлять нечего.
-    """
     user_data = {}
     match_signals = []
 
