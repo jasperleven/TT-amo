@@ -48,34 +48,55 @@ def get_week_range():
     return int(monday.timestamp()), int(now.timestamp())
 
 
-def fetch_sale_leads(date_from, date_to):
-    """Тянет сделки AmoCRM в статусе SALE_STATUS_ID, обновлённые за период."""
+def get_yesterday_range():
+    """Вчера 00:00 -> вчера 23:59:59, unix timestamps."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today - timedelta(days=1)
+    yesterday_end = today - timedelta(seconds=1)
+    return int(yesterday_start.timestamp()), int(yesterday_end.timestamp())
+
+
+def fetch_status_change_events(date_from, date_to):
+    """
+    Тянет события смены статуса на SALE_STATUS_ID через /api/v4/events —
+    это даёт точное время ПЕРЕХОДА в статус, а не любого обновления сделки.
+    Возвращает список entity_id (lead_id), у которых переход произошёл в периоде.
+    """
     headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
-    leads = []
+    lead_ids = []
     page = 1
     while True:
         params = {
-            "filter[statuses][0][status_id]": SALE_STATUS_ID,
-            "filter[updated_at][from]": date_from,
-            "filter[updated_at][to]": date_to,
-            "with": "contacts,tags",
+            "filter[type]": "lead_status_changed",
+            "filter[created_at][from]": date_from,
+            "filter[created_at][to]": date_to,
             "page": page,
             "limit": 250,
         }
-        if PIPELINE_ID:
-            params["filter[statuses][0][pipeline_id]"] = PIPELINE_ID
-
-        r = requests.get(f"{AMO_BASE_URL}/api/v4/leads", headers=headers, params=params, timeout=30)
+        r = requests.get(f"{AMO_BASE_URL}/api/v4/events", headers=headers, params=params, timeout=30)
         if r.status_code == 204:
             break
         r.raise_for_status()
         data = r.json()
-        page_leads = data.get("_embedded", {}).get("leads", [])
-        if not page_leads:
+        events = data.get("_embedded", {}).get("events", [])
+        if not events:
             break
-        leads.extend(page_leads)
+        for ev in events:
+            value_after = ev.get("value_after") or []
+            for v in value_after:
+                status = (v.get("lead_status") or {})
+                if status.get("id") == SALE_STATUS_ID:
+                    lead_ids.append(ev["entity_id"])
         page += 1
-    return leads
+    return list(dict.fromkeys(lead_ids))  # убираем дубли, сохраняя порядок
+
+
+def fetch_lead(lead_id):
+    headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
+    params = {"with": "contacts"}  # теги уже приходят в _embedded по умолчанию для одиночной сделки
+    r = requests.get(f"{AMO_BASE_URL}/api/v4/leads/{lead_id}", headers=headers, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
 def fetch_contact_phone(contact_id):
@@ -127,13 +148,21 @@ def send_tiktok_event(lead_id, phone, value, currency="USD", dry_run=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="только показать, что будет отправлено")
+    parser.add_argument("--yesterday", action="store_true", help="только вчерашний день вместо текущей недели")
     args = parser.parse_args()
 
-    date_from, date_to = get_week_range()
-    print(f"Ищу сделки со статусом {SALE_STATUS_ID}, обновлённые с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
+    date_from, date_to = get_yesterday_range() if args.yesterday else get_week_range()
+    print(f"Ищу переходы в статус {SALE_STATUS_ID}, случившиеся с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
 
-    leads = fetch_sale_leads(date_from, date_to)
-    print(f"Найдено сделок всего: {len(leads)}")
+    lead_ids = fetch_status_change_events(date_from, date_to)
+    print(f"Найдено переходов в статус за период: {len(lead_ids)}")
+
+    leads = []
+    for lead_id in lead_ids:
+        try:
+            leads.append(fetch_lead(lead_id))
+        except requests.HTTPError as e:
+            print(f"lead {lead_id}: не удалось получить сделку ({e}), пропускаю")
 
     leads = [lead for lead in leads if lead_matches_electrovelo(lead)]
     print(f"Из них с тегом байера BC Насти ({', '.join(NASTYA_BC_BUYER_TAGS)}): {len(leads)}")
