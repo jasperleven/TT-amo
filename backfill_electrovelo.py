@@ -26,9 +26,18 @@ TIKTOK_URL = "https://business-api.tiktok.com/open_api/v1.3/event/track/"
 SALE_STATUS_ID = 69561406
 PIPELINE_ID = None  # если нужно ограничить одной воронкой — впиши ID, иначе None
 
-# Поле в custom_fields_values, где лежит телефон контакта — уточни свой field_id,
-# если матчинг у тебя идёт не через основной телефон контакта, а через поле лида
+# Байеры, работающие с BC Насти (пиксель "Электровелосипед общий"), из таблицы
+# активных кампаний tt_links_2.xlsx, лист "Статистика" (колонка Advertiser ID
+# + разбор названия кампании "Товар | БАЕР | ссылка"). Сверяется с тегами сделки.
+NASTYA_BC_BUYER_TAGS = ["VAD", "KRL", "VLD", "ART", "BNS"]
 # ─────────────────────────────────────────────────────────────────────
+
+
+def lead_matches_electrovelo(lead) -> bool:
+    """True, если у сделки есть тег байера, работающего с BC Насти."""
+    tags = lead.get("_embedded", {}).get("tags", [])
+    tag_names = {t.get("name", "").strip().upper() for t in tags}
+    return bool(tag_names & set(NASTYA_BC_BUYER_TAGS))
 
 
 def get_week_range():
@@ -49,7 +58,7 @@ def fetch_sale_leads(date_from, date_to):
             "filter[statuses][0][status_id]": SALE_STATUS_ID,
             "filter[updated_at][from]": date_from,
             "filter[updated_at][to]": date_to,
-            "with": "contacts",
+            "with": "contacts,tags",
             "page": page,
             "limit": 250,
         }
@@ -124,7 +133,10 @@ def main():
     print(f"Ищу сделки со статусом {SALE_STATUS_ID}, обновлённые с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
 
     leads = fetch_sale_leads(date_from, date_to)
-    print(f"Найдено сделок: {len(leads)}")
+    print(f"Найдено сделок всего: {len(leads)}")
+
+    leads = [lead for lead in leads if lead_matches_electrovelo(lead)]
+    print(f"Из них с тегом байера BC Насти ({', '.join(NASTYA_BC_BUYER_TAGS)}): {len(leads)}")
 
     for lead in leads:
         lead_id = lead["id"]
