@@ -50,17 +50,24 @@ def fetch_bc_advertisers(bc_id):
     """Список advertiser_id, принадлежащих указанному Business Center."""
     headers = {"Access-Token": TIKTOK_READ_TOKEN}
     r = requests.get(
-        f"{TIKTOK_API_BASE}/bc/advertiser/get/",
+        f"{TIKTOK_API_BASE}/bc/asset/get/",
         headers=headers,
-        params={"bc_id": bc_id},
+        params={"bc_id": bc_id, "asset_type": "ADVERTISER"},
         timeout=30,
     )
     r.raise_for_status()
     data = r.json()
     if data.get("code") != 0:
-        raise RuntimeError(f"TikTok bc/advertiser/get error: {data}")
+        raise RuntimeError(f"TikTok bc/asset/get error: {data}")
     advertisers = data.get("data", {}).get("list", [])
-    return [a["advertiser_id"] for a in advertisers]
+    if advertisers:
+        print(f"  (пример элемента ответа bc/asset/get: {advertisers[0]})")
+    ids = []
+    for a in advertisers:
+        aid = a.get("advertiser_id") or a.get("asset_id") or a.get("id")
+        if aid:
+            ids.append(aid)
+    return ids
 
 
 def fetch_campaign_names(advertiser_id):
