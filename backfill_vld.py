@@ -131,7 +131,7 @@ def resolve_bc_buyers(bc_id):
 
 def fetch_status_change_events(date_from, date_to):
     headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
-    lead_ids = []
+    lead_times = {}  # lead_id -> unix timestamp реального перехода в статус
     page = 1
     while True:
         params = {
@@ -153,9 +153,12 @@ def fetch_status_change_events(date_from, date_to):
             for v in ev.get("value_after") or []:
                 status = v.get("lead_status") or {}
                 if status.get("id") == SALE_STATUS_ID:
-                    lead_ids.append(ev["entity_id"])
+                    lead_id = ev["entity_id"]
+                    event_ts = ev.get("created_at")
+                    if lead_id not in lead_times:
+                        lead_times[lead_id] = event_ts
         page += 1
-    return list(dict.fromkeys(lead_ids))
+    return lead_times
 
 
 def fetch_lead(lead_id):
@@ -203,7 +206,7 @@ def sha256_hash(value):
     return hashlib.sha256(value.strip().encode("utf-8")).hexdigest()
 
 
-def send_tiktok_event(lead_id, phone, value, dry_run=False):
+def send_tiktok_event(lead_id, phone, value, event_time, dry_run=False):
     payload = {
         "event_source": "web",
         "event_source_id": TIKTOK_PIXEL_ID,
@@ -211,7 +214,7 @@ def send_tiktok_event(lead_id, phone, value, dry_run=False):
             {
                 "event": "CompletePayment",
                 "event_id": f"amo_{lead_id}",
-                "event_time": int(time.time()),
+                "event_time": event_time,
                 "user": {},
                 "properties": {"value": value, "currency": "USD"},
             }
@@ -243,11 +246,11 @@ def main():
     date_from, date_to = get_yesterday_range() if args.yesterday else (None, None)
     print(f"\nИщу переходы в статус {SALE_STATUS_ID} с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
 
-    lead_ids = fetch_status_change_events(date_from, date_to)
-    print(f"Найдено переходов в статус за период: {len(lead_ids)}")
+    lead_times = fetch_status_change_events(date_from, date_to)
+    print(f"Найдено переходов в статус за период: {len(lead_times)}")
 
     matched = 0
-    for lead_id in lead_ids:
+    for lead_id, event_ts in lead_times.items():
         try:
             lead = fetch_lead(lead_id)
         except requests.HTTPError as e:
@@ -265,10 +268,10 @@ def main():
             print(f"lead {lead_id}: байер {buyer} совпал, но нет телефона — пропускаю")
             continue
 
-        send_tiktok_event(lead_id, phone, value, dry_run=args.dry_run)
+        send_tiktok_event(lead_id, phone, value, event_ts, dry_run=args.dry_run)
         time.sleep(0.3)
 
-    print(f"\nИз {len(lead_ids)} продаж отправлено/готово к отправке в VLD_общий: {matched}")
+    print(f"\nИз {len(lead_times)} продаж отправлено/готово к отправке в VLD_общий: {matched}")
 
 
 if __name__ == "__main__":
