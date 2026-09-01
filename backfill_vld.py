@@ -35,7 +35,13 @@ TIKTOK_API_BASE = "https://business-api.tiktok.com/open_api/v1.3"
 TIKTOK_EVENT_URL = f"{TIKTOK_API_BASE}/event/track/"
 
 SALE_STATUS_ID = 69561406
+QUALIFY_STATUS_ID = 69561402  # "Квалифицирован"
 FIELD_COMPANY_ID = 1092699  # "Компания:", формат "Оффер | БАЕР | домен"
+
+STAGES = {
+    "sale": {"status_id": SALE_STATUS_ID, "event_name": "CompletePayment", "include_value": True},
+    "qualify": {"status_id": QUALIFY_STATUS_ID, "event_name": "Qualify lead", "include_value": False},
+}
 # ─────────────────────────────────────────────────────────────────────
 
 
@@ -137,7 +143,7 @@ def resolve_bc_buyers(bc_id):
     return buyers
 
 
-def fetch_status_change_events(date_from, date_to):
+def fetch_status_change_events(date_from, date_to, status_id):
     headers = {"Authorization": f"Bearer {AMO_ACCESS_TOKEN}"}
     lead_times = {}  # lead_id -> unix timestamp реального перехода в статус
     page = 1
@@ -160,7 +166,7 @@ def fetch_status_change_events(date_from, date_to):
         for ev in events:
             for v in ev.get("value_after") or []:
                 status = v.get("lead_status") or {}
-                if status.get("id") == SALE_STATUS_ID:
+                if status.get("id") == status_id:
                     lead_id = ev["entity_id"]
                     event_ts = ev.get("created_at")
                     if lead_id not in lead_times:
@@ -214,19 +220,22 @@ def sha256_hash(value):
     return hashlib.sha256(value.strip().encode("utf-8")).hexdigest()
 
 
-def send_tiktok_event(lead_id, phone, value, event_time, dry_run=False):
+def send_tiktok_event(lead_id, phone, value, event_time, event_name, id_prefix, include_value, dry_run=False):
+    data_item = {
+        "event": event_name,
+        "event_id": f"{id_prefix}_{lead_id}",
+        "event_time": event_time,
+        "user": {},
+    }
+    if include_value:
+        data_item["properties"] = {"value": value, "currency": "USD"}
+    else:
+        data_item["properties"] = {}
+
     payload = {
         "event_source": "web",
         "event_source_id": TIKTOK_PIXEL_ID,
-        "data": [
-            {
-                "event": "CompletePayment",
-                "event_id": f"amo_{lead_id}",
-                "event_time": event_time,
-                "user": {},
-                "properties": {"value": value, "currency": "USD"},
-            }
-        ],
+        "data": [data_item],
     }
     if phone:
         payload["data"][0]["user"]["phone"] = sha256_hash(phone)
@@ -245,7 +254,15 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yesterday", action="store_true")
     parser.add_argument("--date", type=str, help="Конкретная дата в формате YYYY-MM-DD, например 2026-08-30")
+    parser.add_argument("--stage", type=str, choices=list(STAGES.keys()), default="sale",
+                         help="Какой этап воронки отправлять: 'sale' (продажа, CompletePayment) или 'qualify' (Квалифицирован, Qualify lead)")
     args = parser.parse_args()
+
+    stage = STAGES[args.stage]
+    status_id = stage["status_id"]
+    event_name = stage["event_name"]
+    include_value = stage["include_value"]
+    id_prefix = f"amo_{args.stage}"
 
     bc_buyers = resolve_bc_buyers(TIKTOK_BC_ID)
     if not bc_buyers:
@@ -259,9 +276,9 @@ def main():
     else:
         print("Укажи --yesterday или --date YYYY-MM-DD")
         return
-    print(f"\nИщу переходы в статус {SALE_STATUS_ID} с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
+    print(f"\n[{args.stage}] Ищу переходы в статус {status_id} с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
 
-    lead_times = fetch_status_change_events(date_from, date_to)
+    lead_times = fetch_status_change_events(date_from, date_to, status_id)
     print(f"Найдено переходов в статус за период: {len(lead_times)}")
 
     matched = 0
@@ -283,10 +300,10 @@ def main():
             print(f"lead {lead_id}: байер {buyer} совпал, но нет телефона — пропускаю")
             continue
 
-        send_tiktok_event(lead_id, phone, value, event_ts, dry_run=args.dry_run)
+        send_tiktok_event(lead_id, phone, value, event_ts, event_name, id_prefix, include_value, dry_run=args.dry_run)
         time.sleep(0.3)
 
-    print(f"\nИз {len(lead_times)} продаж отправлено/готово к отправке в VLD_общий: {matched}")
+    print(f"\nИз {len(lead_times)} переходов в статус '{args.stage}' отправлено/готово к отправке в VLD_общий: {matched}")
 
 
 if __name__ == "__main__":
