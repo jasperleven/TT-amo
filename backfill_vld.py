@@ -101,10 +101,15 @@ def fetch_campaign_names(advertiser_id):
 
 
 def parse_buyer(campaign_or_field_name):
-    """Из строки 'Оффер | БАЕР | домен' достаёт БАЕР (второй сегмент)."""
+    """Из строки 'Оффер | БАЕР | домен' достаёт БАЕР (второй сегмент).
+    Отсеивает случаи, когда во втором сегменте оказалось название оффера
+    (кириллица, длинная строка) вместо короткого латинского кода байера."""
     parts = [p.strip() for p in campaign_or_field_name.split("|")]
-    if len(parts) >= 2:
-        return parts[1].upper()
+    if len(parts) < 2:
+        return None
+    candidate = parts[1].upper()
+    if re.fullmatch(r"[A-Z]{2,6}", candidate):
+        return candidate
     return None
 
 
