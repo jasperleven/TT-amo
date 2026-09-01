@@ -46,6 +46,14 @@ def get_yesterday_range():
     return int(start.timestamp()), int(end.timestamp())
 
 
+def get_date_range(date_str):
+    """date_str в формате YYYY-MM-DD — весь этот день, 00:00:00 -> 23:59:59."""
+    day = datetime.strptime(date_str, "%Y-%m-%d")
+    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = day.replace(hour=23, minute=59, second=59, microsecond=0)
+    return int(start.timestamp()), int(end.timestamp())
+
+
 def fetch_bc_advertisers(bc_id):
     """Список advertiser_id, принадлежащих указанному Business Center."""
     headers = {"Access-Token": TIKTOK_READ_TOKEN}
@@ -236,6 +244,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yesterday", action="store_true")
+    parser.add_argument("--date", type=str, help="Конкретная дата в формате YYYY-MM-DD, например 2026-08-30")
     args = parser.parse_args()
 
     bc_buyers = resolve_bc_buyers(TIKTOK_BC_ID)
@@ -243,7 +252,13 @@ def main():
         print("Не удалось определить ни одного байера для этого BC — прерываю, чтобы не слать всё подряд.")
         return
 
-    date_from, date_to = get_yesterday_range() if args.yesterday else (None, None)
+    if args.date:
+        date_from, date_to = get_date_range(args.date)
+    elif args.yesterday:
+        date_from, date_to = get_yesterday_range()
+    else:
+        print("Укажи --yesterday или --date YYYY-MM-DD")
+        return
     print(f"\nИщу переходы в статус {SALE_STATUS_ID} с {datetime.fromtimestamp(date_from)} по {datetime.fromtimestamp(date_to)}")
 
     lead_times = fetch_status_change_events(date_from, date_to)
