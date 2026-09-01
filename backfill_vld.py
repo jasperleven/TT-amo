@@ -1,18 +1,22 @@
 """
-Бэкфилл продаж (статус "Договор подписан") в пиксель VLD_общий
-(BC TechnoWave_shop, 7632400042631888913).
+Бэкфилл продаж (статус "Договор подписан") и квал-лидов (статус
+"Квалифицирован") в любой TikTok-пиксель/BC — какой именно, задаётся
+через переменные окружения TIKTOK_PIXEL_ID и TIKTOK_BC_ID.
 
-В отличие от версии для BC Насти, список "своих" байеров тут строится
-динамически: скрипт спрашивает у самого TikTok, какие рекламные кабинеты
-(advertiser_id) числятся в этом BC, тянет их кампании и парсит из названий
-байеров (формат "Оффер | БАЕР | домен"). Дальше сверяет с полем
-"Компания:" (FIELD_COMPANY) сделки AmoCRM — там точно такой же формат.
+Список "своих" байеров строится динамически: скрипт спрашивает у
+самого TikTok, какие рекламные кабинеты (advertiser_id) числятся в
+указанном BC, тянет их кампании и парсит из названий байеров (формат
+"Оффер | БАЕР | домен"). Дальше сверяет с полем "Компания:"
+(FIELD_COMPANY) сделки AmoCRM — там точно такой же формат.
 
 Запуск:
     export AMO_ACCESS_TOKEN="..."
-    export TIKTOK_ACCESS_TOKEN="..."        # per-pixel token для отправки событий
+    export TIKTOK_PIXEL_ID="D7PKT3BC77UDOFSGA31G"   # нужный пиксель
+    export TIKTOK_BC_ID="7632400042631888913"       # его BC
+    export TIKTOK_ACCESS_TOKEN="..."        # per-pixel token для отправки событий (этого пикселя!)
     export TIKTOK_READ_TOKEN="..."          # OAuth-токен с доступом на чтение кампаний ("google s")
-    python3 backfill_vld.py --dry-run --yesterday
+    python3 backfill_vld.py --dry-run --stage sale --date 2026-08-30
+    python3 backfill_vld.py --dry-run --stage qualify --date 2026-08-30
 """
 
 import argparse
@@ -27,10 +31,10 @@ from datetime import datetime, timedelta
 AMO_BASE_URL = "https://daangrah000.amocrm.ru"
 AMO_ACCESS_TOKEN = os.environ["AMO_ACCESS_TOKEN"]
 
-TIKTOK_PIXEL_ID = "D7PKT3BC77UDOFSGA31G"           # VLD_общий
-TIKTOK_ACCESS_TOKEN = os.environ["TIKTOK_ACCESS_TOKEN"]     # per-pixel токен для event/track
+TIKTOK_PIXEL_ID = os.environ["TIKTOK_PIXEL_ID"]              # пиксель, в который шлём события
+TIKTOK_ACCESS_TOKEN = os.environ["TIKTOK_ACCESS_TOKEN"]     # per-pixel токен для event/track (именно этого пикселя)
 TIKTOK_READ_TOKEN = os.environ["TIKTOK_READ_TOKEN"]         # OAuth токен с доступом campaign:read
-TIKTOK_BC_ID = "7632400042631888913"               # BC TechnoWave_shop
+TIKTOK_BC_ID = os.environ["TIKTOK_BC_ID"]                    # BC, которому принадлежит пиксель
 TIKTOK_API_BASE = "https://business-api.tiktok.com/open_api/v1.3"
 TIKTOK_EVENT_URL = f"{TIKTOK_API_BASE}/event/track/"
 
